@@ -13,12 +13,12 @@ license = { file = "LICENSE" }
 readme = "README.md"
 dependencies = [
     "numpy",
-    "scipy",
 ]
 
 [project.optional-dependencies]
-docs = ["sphinx", "sphinx-rtd-theme", "nbsphinx", "ruff", "ipython"]
+docs = ["pydata-sphinx-theme", "nbsphinx", "ruff", "ipython"]
 export = ["mne", "eeglabio"]
+full = ["multisim[docs,export]"]
 
 [project.urls]
 Homepage = "https://github.com/AlexLepauvre/meeg_simulator"

@@ -21,9 +21,9 @@ class Simulator:
     X : array, shape (n_epochs, n_experimental_conditions)
         Between-trial design matrix specifying experimental manipulations.
     noise_std : float
-        Standard deviation of additive Gaussian noise (applied before spatial covariance).
+        Standard deviation of additive Gaussian noise (applied before channel covariance).
     n_channels : int
-        Number of spatial modes (e.g., sensors or components) in the simulated data.
+        Number of channels (e.g., sensors or components) in the simulated data.
     n_subjects : int
         Number of subjects to simulate.
     tmin : float
@@ -35,60 +35,61 @@ class Simulator:
     t_win : array, shape (n_effects, 2)
         Time windows (start, end) in seconds where each experimental effect is nonzero.
     effects : array, shape (n_effects,)
-        Indices of the experimental conditions (columns of `X`) associated with
-        time-locked effects. Each entry corresponds to a row in `t_win`.
+        Indices of the experimental conditions (columns of ``X``) associated with
+        time-locked effects. Each entry corresponds to a row in ``t_win``.
     effects_amp : array, shape (n_effects,) | None, optional
         Amplitudes of the effects. Effects are simulated by sampling beta parameters
-        from a normal distribution across channels, with `effects_amp` defining
+        from a normal distribution across channels, with ``effects_amp`` defining
         the variance of the distribution. Do not specify if you use effect size
         and reciprocally. Default is None (use effect size instead).
     effect_size : array, shape (n_effects,), optional
         Standardized multivariate effect size (Mahalanobis distance) for each effect.
-        Internally converted to an amplitude `a` (which scales the spread of the betas)
+        Internally converted to an amplitude :math:`a` (which scales the spread of the betas)
         by solving:
-            d' = a / σ · √(vᵀ Σ⁻¹ v)
-        for a, where
-        - σ = `noise_std`,
-        - Σ = `ch_cov` (sensor covariance),
-        - v = spatial pattern (unit vector across modes).
+
+        .. math::
+
+            d' = \\frac{a}{\\sigma} \\cdot \\sqrt{v^T \\Sigma^{-1} v}
+
+        where :math:`\\sigma` = ``noise_std``, :math:`\\Sigma` = ``ch_cov`` (channel covariance),
+        and :math:`v` = channel pattern (unit vector across channels).
+
         Thus the injected β-weights satisfy a Mahalanobis distance of d'
         between condition centroids, yielding theoretical decoding
-        accuracy ≈ Φ(d'/2). Do not use if you specify effects_amp directly
-        Default is 0.5
+        accuracy ≈ :math:`\\Phi(d'/2)`. Do not use if you specify effects_amp directly.
+        Default is 0.5.
     ch_cov : array, shape (n_channels, n_channels) | None, optional
         Channel data covariance matrix for the simulated data. If None, an identity
         matrix is used (i.e., no cross-channel correlations).
-    ch_type : str, optional
-        Type of simulated channels, e.g., `'eeg'` or `'meg'`. Default is `'eeg'`.
     kern : array, shape (n_samples, ), optional
-        Temporal kernel. Should be 1 dimensional. If none, no temporal kernel is applied
+        Temporal kernel. Should be 1 dimensional. If none, no temporal kernel is applied.
     intersub_noise_std : float, optional
-        Inter subject standard deviation in the effect amp. If not specified, assume no
-        inter subject variability
+        Inter-subject standard deviation in the effect amp. If not specified, assume no
+        inter-subject variability.
 
     Attributes
     ----------
-    data: list of np.ndarray of shape (n_epochs, n_channels, n_samples)
+    data : list of numpy array(s) of shape (n_epochs, n_channels, n_samples)
         Simulated data for each subject.
 
     Raises
     ------
     ValueError
-        If the number of rows in `t_win` does not match the length of `effects`.
+        If the number of rows in ``t_win`` does not match the length of ``effects``.
 
     Notes
     -----
-    - This function follows the **same methodological principles** as `DEMO_CVA_RSA.m` from SPM,
+    - This function follows the **same methodological principles** as ``DEMO_CVA_RSA.m`` from SPM,
       but extends it by adding time-resolved experimental effects.
     - The original implementation in SPM was developed by **Karl Friston and Peter Zeidman**.
-    - The generated data follows an event-related structure, suitable for
+    - The generated data follows an event-related structure, suitable for 
       classification and decoding analyses.
-    - Effects are injected into selected experimental conditions based on `X`.
+    - Effects are injected into selected experimental conditions based on ``X``.
 
     References
     ----------
     .. [1] Friston, K., & Zeidman, P. "DEMO_CVA_RSA.m", Statistical Parametric Mapping (SPM).
-    Available at: https://github.com/spm/spm/blob/main/toolbox/DEM/DEMO_CVA_RSA.m
+           Available at: https://github.com/spm/spm/blob/main/toolbox/DEM/DEMO_CVA_RSA.m
 
     Examples
     --------
@@ -158,7 +159,7 @@ class Simulator:
             effect_size = np.asarray(effect_size, float)
             if effect_size.shape != (len(effects),):
                 raise ValueError("'effect_size' must match len(effects).")
-            # Normalize effect size by the spatial covariance matrix:
+            # Normalize effect size by the channel covariance matrix:
             inv_cov = np.linalg.pinv(ch_cov)  # pseudoinverse
             denom = np.sqrt(np.trace(inv_cov))  # = √n_channels  if Σ = I
             effects_amp = effect_size * noise_std / denom  # guarantees d′ = effect_size
@@ -258,7 +259,7 @@ class Simulator:
             #     shape => [n_samples*self.n_exp_conditions, n_channels]
             # --------------------------------------------------
             # Generate beta parameters randomy sampled from a standard normal distribution,
-            # but using CV to set the effects to their desired effect sizes. Adding spatial covariance across effects
+            # but using CV to set the effects to their desired effect sizes. Adding channel covariance across effects
             B = (
                 cv_diagonal
                 @ np.random.randn(n_samples * self.n_exp_conditions, n_channels)
@@ -280,10 +281,10 @@ class Simulator:
             sub_data += intercept
 
             # --------------------------------------------------
-            # 7d. Add noise (spatially correlated)
+            # 7d. Add noise (channel-correlated)
             # --------------------------------------------------
             noise = np.random.randn(self.n_epochs * n_samples, n_channels)
-            # Apply spatial covariance
+            # Apply channel covariance
             noise = noise @ ch_cov
             noise *= noise_std
 
@@ -387,7 +388,8 @@ class Simulator:
         Parameters
         ----------
         ch_type : str, optional
-            Type of the simulated channels
+            Type of simulated channels, e.g., ``'eeg'`` or ``'meg'``.
+            Default is ``'eeg'``.
         X : np.ndarray, shape (n_trials, n_conditions), optional
             Design matrix to use. If None, defaults to self.X.
         cond_names : list of str, optional

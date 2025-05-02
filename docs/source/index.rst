@@ -1,7 +1,7 @@
-multisim: A toolbox for simulating multivariate EEG/MEG data
+MultiSim: A toolbox for simulating multivariate EEG/MEG data
 =============================================================
 
-**multisim** is a Python package for simulating multivariate EEG/MEG datasets with user-defined experimental effects.  
+**MultiSim** is a Python package for simulating multivariate EEG/MEG datasets with user-defined experimental effects.  
 It enables principled testing and validation of decoding pipelines, source reconstruction methods, and statistical analyses.
 
 Features
@@ -11,7 +11,7 @@ Features
 - Inject effects at specified time windows and across specified conditions
 - Control signal-to-noise ratio, spatial covariance, temporal smoothing, and between-subject variability
 - Generate multiple subjects for group-level statistical analysis
-- Export to `MNE-Python` and `EEGLAB` formats
+- Export to `MNE-Python <https://mne.tools/>`_ and `EEGLAB <https://sccn.ucsd.edu/eeglab/>`_ formats
 
 Installation
 ------------
@@ -22,7 +22,7 @@ You can install the package using pip:
 
    pip install multisim
 
-To install with full dependencies (e.g., for notebooks or visualization):
+To install with full dependencies (e.g., for notebooks, visualization, or exporting to other formats):
 
 .. code-block:: bash
 
@@ -45,16 +45,16 @@ Usage Example
 
    # Simulate data
    sim = Simulator(
-       X=X,
-       noise_std=0.1,
-       n_channels=64,
-       n_subjects=20,
-       tmin=-0.2,
-       tmax=0.8,
-       sfreq=250,
-       t_win=t_win,
-       effects=effects,
-       effect_size=[0.5],  # Mahalanobis effect size
+      X=X,
+      noise_std=0.1,
+      n_channels=64,
+      n_subjects=20,
+      tmin=-0.2,
+      tmax=0.8,
+      sfreq=250,
+      t_win=t_win,
+      effects=effects,
+      effect_size=[0.5],  # Mahalanobis effect size
    )
 
    data = sim.data  # List of simulated subjects
@@ -69,7 +69,8 @@ https://alexlepauvre.github.io/meeg_simulator/
 License
 -------
 
-MIT License
+.. literalinclude:: ../../LICENSE
+   :language: none
 
 Citation
 --------
@@ -80,6 +81,6 @@ If you use this toolbox in your research, please cite the accompanying paper (in
    :maxdepth: 2
    :hidden:
 
-   API reference <api/index>
+   Simulator class <api>
    Tutorials <tutorial/index>
 

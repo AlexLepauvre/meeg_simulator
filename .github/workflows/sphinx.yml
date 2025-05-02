@@ -22,12 +22,7 @@ jobs:
         run: sudo apt-get install pandoc
 
       - name: Install Sphinx & Dependencies
-        run: |
-          pip install sphinx sphinx-rtd-theme nbsphinx pydata_sphinx_theme ipython numpydoc
-          pip install .[full]
-
-      - name: Install Ruff
-        run: pip install ruff
+        run: pip install .[docs]
 
       - name: Format Code
         env:
