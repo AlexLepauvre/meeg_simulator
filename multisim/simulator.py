@@ -1,53 +1,65 @@
 import numpy as np
+import pandas as pd
 import os
-from typing import Optional
+from typing import List, Dict, Tuple, Optional, Sequence
 
 
 class Simulator:
     """
     Simulate epoched MEG/EEG data with multivariate patterns.
 
-    This class generates simulated EEG/MEG data with predefined experimental
-    effects, allowing for controlled evaluation of analysis methods. Effects are
-    introduced at specified time windows, serving as ground truth signals.
-
-    The method used here is based on the approach implemented in **SPM's `DEMO_CVA_RSA.m`**
-    function, originally developed by **Karl Friston and Peter Zeidman** [1]_.
-    Our implementation extends their method by incorporating **time-resolved effects**,
-    allowing for dynamic experimental manipulations over specified time windows.
+    This generator follows the general spirit of Friston & Zeidman’s
+    **SPM `DEMO_CVA_RSA.m`** but adds *time-resolved* effects so that each
+    experimental manipulation can switch on/off within an epoch.
 
     Parameters
     ----------
-    X : array, shape (n_epochs, n_experimental_conditions)
-        Trial-by-trial design matrix specifying experimental manipulations.
-    noise_std : float
-        Standard deviation of additive Gaussian noise (applied before channel covariance).
-    n_channels : int
-        Number of channels (e.g., sensors or components) to simulate.
-    n_subjects : int
-        Number of subjects to simulate.
-    tmin : float
-        Start time (in seconds) of each epoch.
-    tmax : float
-        End time (in seconds) of each epoch.
-    sfreq : float
-        Sampling frequency in Hz.
-    t_win : array-like, shape (n_effects, 2)
-        Time windows (start, end) in seconds where each experimental effect is nonzero.
-    effects : array-like, shape (n_effects,)
-        Indices of the experimental conditions (columns of ``X``) associated with
-        time-locked effects. Each entry corresponds to a row in ``t_win``.
-    effects_amp : array-like, shape (n_effects,), optional
-        Amplitudes of the effects. Effects are simulated by sampling beta parameters
-        from a normal distribution across channels, with ``effects_amp`` defining
-        the variance of the distribution. Do not specify if you use ``effect size``
-        and reciprocally. Default is None (use effect size instead).
-    effect_size : array-like, shape (n_effects,), optional
-        Standardized multivariate effect size (Mahalanobis distance) for each effect.
-        Internally converted to an amplitude :math:`a` (which scales the spread of the betas)
-        by solving:
+    X : pandas.DataFrame, shape (n_epochs, n_conditions)
+        Trial-by-trial design matrix. **Must have named columns**.
+    effects : list[dict]
+        Each dict describes **one multivariate pattern**.  Required keys
 
-        .. math::
+        ============= ==========================================================
+        Key           Meaning
+        ------------- ----------------------------------------------------------
+        ``condition`` Column name in *X*
+        ``windows``   List of ``(start, end)`` time pairs *(seconds)*
+        ``effect_size`` or ``effect_amp``
+                       *effect_size* = Mahalanobis distance * d′*  
+                       *effect_amp*  = amplitude of β-weights directly
+        ============= ==========================================================
+
+        *One dict → one pattern.*  To share a pattern across several windows,
+        list them in a single dict.  To have different patterns, provide
+        multiple dicts with the same ``condition``.
+    noise_std : float
+        Standard deviation of additive Gaussian noise
+    n_channels : int
+        Number of channels (sensors/components).
+    n_subjects : int
+        Number of subjects.
+    tmin, tmax : float
+        Epoch start and end (seconds).
+    sfreq : float
+        Sampling frequency (Hz).
+    ch_cov : ndarray | None, shape (n_channels, n_channels), default *identity*
+        Channel covariance.
+    kern : 1-D ndarray | None
+        Optional causal temporal kernel
+    intersub_noise_std : float, default 0
+        SD of between-subject variability in effect amplitude.
+    random_state : int | numpy.random.Generator | None
+        Seed or generator for reproducibility.
+
+    Notes
+    -----
+    **Mathematical relation between ``effect_size`` and β-amplitudes**
+
+    For a single pattern *v* (vector across channels) with amplitude *a*,
+    noise standard deviation *σ* and channel covariance *Σ*, the theoretical
+    Mahalanobis distance between condition centroids is
+
+    .. math::
 
             d' = \\frac{a}{\\sigma} \\cdot \\sqrt{v^T \\Sigma^{-1} v}
 
@@ -58,33 +70,27 @@ class Simulator:
         between condition centroids, yielding theoretical decoding
         accuracy ≈ :math:`\\Phi(d'/2)`. Do not use if you specify effects_amp directly.
         Default is 0.5.
-    ch_cov : array, shape (n_channels, n_channels) | None, optional
-        Channel data covariance matrix for the simulated data. If None, an identity
-        matrix is used (i.e., no cross-channel correlations).
-    kern : array, shape (n_samples, ), optional
-        Temporal kernel. Should be 1 dimensional. If none, no temporal kernel is applied.
-    intersub_noise_std : float, optional
-        Inter-subject standard deviation in the effect amp. If not specified, assume no
-        inter-subject variability.
 
-    Attributes
-    ----------
-    data : list of numpy array(s) of shape (n_epochs, n_channels, n_samples)
-        Simulated data for each subject.
+    .. math::
 
-    Raises
-    ------
-    ValueError
-        If the number of rows in ``t_win`` does not match the length of ``effects``.
+        d' \;=\; \frac{a}{\sigma}\,\sqrt{v^{\mathsf T}\,\Sigma^{-1}\,v}
 
-    Notes
-    -----
-    - This function follows the **same methodological principles** as ``DEMO_CVA_RSA.m`` from SPM,
-      but extends it by adding time-resolved experimental effects.
-    - The original implementation in SPM was developed by **Karl Friston and Peter Zeidman**.
-    - The generated data follows an event-related structure, suitable for
-      classification and decoding analyses.
-    - Effects are injected into selected experimental conditions based on ``X``.
+    We draw *v* from a standard normal and **normalise it to unit Mahalanobis
+    norm** (‖*v*‖_{Σ^{-1}} = 1).  Therefore the distance simplifies to
+
+    .. math::
+        d' = \frac{a}{\sigma}
+
+    so the amplitude we must inject is
+
+    .. math::
+        a = d'\,\sigma / \sqrt{\operatorname{tr}(\Sigma^{-1})}
+
+    (because for unit-Mahalanobis vectors the expected Euclidean norm in
+    channel space is :math:`\sqrt{\operatorname{tr}(\Sigma^{-1})}`).
+
+    If the user supplies ``effect_amp`` directly, that value is taken instead
+    and the conversion above is skipped.
 
     References
     ----------
@@ -97,221 +103,192 @@ class Simulator:
 
     >>> import numpy as np
     >>> from meeg_simulator import simulate_data
-    >>> X = np.random.randn(100, 2)  # 100 trials, 2 experimental conditions
+    >>> X = pd.DataFrame(np.random.randn(100, 1), columns=["face-object"]) # 100 trials, 1 experimental condition
     >>> t_win = np.array([[0.2, 0.5]])  # Effect between 200-500 ms
-    >>> effects = np.array([1])  # Effect corresponds to second column of X
+    >>> effects = [
+        {"condition": 'face-object',
+         "windows": [0.1, 0.3],
+         "effect_size": 0.5
+        }
+    ]
     >>> sims = Simulator(
     ...   X, noise_std=0.1, n_channels=64, n_subjects=20,
     ...   tmin=-0.2, tmax=0.8, sfreq=250,
     ...   t_win=t_win, effects=effects
     ...   )
-    >>> print(len(sims.data))  # Should return 20 subjects
+    >>> sim.summary()  # Should return 20 subjects
     """
 
     def __init__(
         self,
-        X: np.ndarray,
+        X: pd.DataFrame,
+        effects: List[Dict],
         noise_std: float,
         n_channels: int,
         n_subjects: int,
         tmin: float,
         tmax: float,
         sfreq: float,
-        t_win: np.ndarray,
-        effects: np.ndarray,
-        effects_amp: Optional[np.ndarray] = None,
-        effect_size: Optional[np.ndarray] = None,
         ch_cov: Optional[np.ndarray] = None,
         kern: Optional[np.ndarray] = None,
-        intersub_noise_std: Optional[float] = 0,
-    ):
-        # ---------------------------------------------------------------------
-        # 1. Check inputs & compute the number of samples
-        # ---------------------------------------------------------------------
-        if len(effects) != len(t_win):
-            raise ValueError(
-                "The dimension of 'effects' and 't_win' do not match! "
-                "There should be exactly one time window for each effect."
-            )
-        if ch_cov is None:
-            ch_cov = np.eye(n_channels)  # Identity covariance matrix
-        elif ch_cov.shape != (n_channels, n_channels):
-            raise ValueError(
-                f"ch_cov must be shape ({n_channels}, {n_channels}), "
-                f"but got {ch_cov.shape}."
-            )
-        if kern is not None:
-            if len(kern) == 0 or kern.ndim != 1:
-                raise ValueError("'kern' must be a 1-D numpy array.")
-            # Ensure float dtype for later maths
-            kern = kern.astype(float)
-            # Normalize the kernel (so that it sums up to 1):
-            kern = kern / kern.sum()
-        invalid_effects = ~np.isin(effects, np.arange(X.shape[1]))
-        if invalid_effects.any():
-            raise ValueError(
-                f"Invalid effect indices found in 'effects': {effects[invalid_effects]}. "
-                "They must be within the range of experimental conditions in X."
-            )
-
-        # ------------------------------------------------------------------
-        #  Resolve effect amplitudes (channel-norm–corrected)
-        # ------------------------------------------------------------------
-        if effects_amp is not None and effect_size is not None:
-            raise ValueError("Pass either 'effects_amp' or 'effect_size', not both.")
-
-        if effects_amp is not None:
-            effects_amp = np.asarray(effects_amp, float) / np.sqrt(n_channels)
-
-        elif effect_size is not None:
-            effect_size = np.asarray(effect_size, float)
-            if effect_size.shape != (len(effects),):
-                raise ValueError("'effect_size' must match len(effects).")
-            # Normalize effect size by the channel covariance matrix:
-            inv_cov = np.linalg.pinv(ch_cov)  # pseudoinverse
-            denom = np.sqrt(np.trace(inv_cov))  # = √n_channels  if Σ = I
-            effects_amp = effect_size * noise_std / denom  # guarantees d′ = effect_size
-
-        else:  # default: effect size of 0.5 (mahlanobis distance)
-            inv_cov = np.linalg.pinv(ch_cov)  # safe inverse
-            denom = np.sqrt(np.trace(inv_cov))  # = √n_channels if Σ = I
-            effects_amp = (
-                np.full(len(effects), 0.5) * noise_std / denom
-            )  # guarantees d′ = effect_size
-
-        self.X = X
-        self.noise_std = noise_std
-        self.n_channels = n_channels
-        self.n_subjects = n_subjects
-        self.tmin = tmin
-        self.tmax = tmax
-        self.sfreq = sfreq
-        self.t_win = t_win
-        self.effects = effects
-        self.effects_amp = effects_amp
-        self.ch_cov = ch_cov
+        intersub_noise_std: float = 0.0,
+        random_state: Optional[object] = None,
+    ) -> None:
+        
+        # 1. Initialize class:
+        self.rng = np.random.default_rng(random_state)
+        self.X = X.copy()
+        self.noise_std = float(noise_std)
+        self.n_channels = int(n_channels)
+        self.n_subjects = int(n_subjects)
+        self.tmin, self.tmax, self.sfreq = float(tmin), float(tmax), float(sfreq)
+        self.intersub_noise_std = float(intersub_noise_std)
         self.n_epochs, self.n_exp_conditions = X.shape
+
+        if self.tmax <= self.tmin:
+            raise ValueError("tmax must be greater than tmin.")
+        if self.sfreq <= 0:
+            raise ValueError("sfreq must be positive.")
+        
+        # 2. Number of samples per epoch:
+        self.n_samples = int(round((self.tmax - self.tmin) * self.sfreq)) - 1
+        if self.n_samples <= 0:
+            raise ValueError("Derived n_samples must be > 0.  Check tmin/tmax/sfreq.")
+
+        # 3. Specify channel covariance
+        if ch_cov is None:
+            ch_cov = np.eye(n_channels)
+        ch_cov = np.asarray(ch_cov, float)
+        if ch_cov.shape != (n_channels, n_channels):
+            raise ValueError("ch_cov must have shape (n_channels, n_channels).")
+        self.ch_cov = ch_cov
+
+        # 4. Prepare kernel --------------------------------------------------------
+        if kern is not None:
+            kern = np.asarray(kern, float).squeeze()
+            if kern.ndim != 1 or kern.size == 0:
+                raise ValueError("kern must be a 1-D non-empty array.")
+            # Normalize kernel
+            kern = kern / kern.sum()
         self.kern = kern
 
-        # Make sure we get an integer sample count:
-        n_samples = int(round((tmax - tmin) * sfreq)) - 1
-        if n_samples <= 0:
-            raise ValueError(
-                "Derived 'n_samples' must be positive. Check tmin, tmax, and sfreq."
-            )
+        # 5. Prepare effects -------------------------------------------------
+        self.effects = self._parse_effects(effects)
 
-        # ---------------------------------------------------------------------
-        # 2. Create a time vector for each epoch and the FIR (identity) within-trial design
-        # ---------------------------------------------------------------------
-        t = np.linspace(tmin, tmax, n_samples + 1, endpoint=False)[1:]
-        # Identity matrix => one column per time point
-        Xt = np.eye(n_samples)  # shape => [n_samples, n_samples]
+        # 6. pre-compute design matrices ----------------------------------
+        self._tvec = np.linspace(self.tmin, self.tmax, self.n_samples + 1, endpoint=False)[1:]
+        Xt = np.eye(self.n_samples)                                # [T, T]
+        self._X_full = np.kron(self.X.values, Xt)                  # [N*T, P*T]
+        self._X0 = np.ones((self.n_epochs * self.n_samples, 1))    # intercept
 
-        # ---------------------------------------------------------------------
-        # 3. Construct the full design matrix with the Kronecker product
-        #    shape => [n_epochs*n_samples, self.n_exp_conditions*n_samples]
-        # ---------------------------------------------------------------------
-        X_full = np.kron(X, Xt)
+        # 7. simulate ------------------------------------------------------
+        self.data: List[np.ndarray] = []
+        for _ in range(self.n_subjects):
+            self.data.append(self._simulate_one_subject())
 
-        # ---------------------------------------------------------------------
-        # 4. Intercept term across all trials and samples
-        #    shape => [n_epochs*n_samples, 1]
-        # ---------------------------------------------------------------------
-        X0 = np.ones((self.n_epochs * n_samples, 1), dtype=float)
+    def _parse_effects(self, effects_in: Sequence[Dict]) -> List[Dict]:
+        """Validate and canonicalise the user-supplied effects list."""
+        if not isinstance(effects_in, (list, tuple)) or len(effects_in) == 0:
+            raise ValueError("effects must be a non-empty list of dictionaries.")
 
-        # ---------------------------------------------------------------------
-        # 5. Prepare outputs: loop over subjects and simulate data
-        # ---------------------------------------------------------------------
-        self.data = []
+        effect_val: List[Dict] = []
+        for i, eff in enumerate(effects_in):
+            if not isinstance(eff, dict):
+                raise TypeError(f"Effect #{i} is not a dict.")
+            if "condition" not in eff or "windows" not in eff:
+                raise ValueError(f"Effect #{i}: must have 'condition' and 'windows'.")
 
-        # Each subject gets unique random draws
-        for _ in range(n_subjects):
-            # ---------------------------------------------------------------------
-            # 6. Build a "time activation" matrix for each experimental condition
-            #    cv.shape => [n_samples, self.n_exp_conditions]
-            #    This marks time points in which each condition is active (1) or inactive (0)
-            # ---------------------------------------------------------------------
-            cv = np.zeros((n_samples, self.n_exp_conditions), dtype=float)
-            # Preallocate for storing subject specific amplitudes:
-            subject_effect_amp = np.zeros(effects_amp.shape)
-            for idx, eff_cond in enumerate(effects):
-                # Identify which samples lie in the desired time window
-                start_t, end_t = t_win[idx]
-                # Mask for t in [start_t, end_t]
-                mask = (t >= start_t) & (t <= end_t)
-                subject_effect_amp[idx] = np.random.normal(
-                    loc=effects_amp[idx], scale=intersub_noise_std
-                )
-                cv[mask, eff_cond] = subject_effect_amp[idx]
+            cond = eff["condition"]
+            if cond not in self.X.columns:
+                raise ValueError(f"Effect #{i}: unknown condition '{cond}'.")
+            col_idx = self.X.columns.get_loc(cond)
 
-            # --------  OPTIONAL  temporal convolution  (causal only)  --------
-            if kern is not None:
-                for c in range(self.n_exp_conditions):
-                    # causal (forward-only) convolution, keep length = n_samples
-                    cv[:, c] = np.convolve(cv[:, c], kern, mode="full")[:n_samples]
-                    # Ensure that the max value after convolution matches the effect_amp specified
-                    peak = np.max(np.abs(cv[:, c]))
-                    if peak <= 0:
-                        raise RuntimeError("Convolution dropped all signal!")
-                    cv[:, c] *= subject_effect_amp[idx] / peak
+            windows = eff["windows"]
+            # normalise windows to list[tuple]
+            if isinstance(windows, (list, tuple)) and len(windows) > 0:
+                if isinstance(windows[0], (int, float)):
+                    windows = [tuple(windows)]  # single pair
+                else:
+                    windows = [tuple(w) for w in windows]
+            else:
+                raise ValueError(f"Effect #{i}: 'windows' malformed.")
 
-            # Flatten cv to shape [n_samples*self.n_exp_conditions] so we can build a diagonal "selector"
-            # and multiply it by random effects. That ensures only certain (time, condition) combos
-            # end up non-zero.
-            cv_diagonal = np.diag(
-                cv.T.flatten()
-            )  # shape => [n_samples*self.n_exp_conditions, n_samples*self.n_exp_conditions]
+            if "effect_amp" in eff and "effect_size" in eff:
+                raise ValueError(f"Effect #{i}: specify *either* effect_size or effect_amp, not both.")
+            if "effect_amp" not in eff and "effect_size" not in eff:
+                raise ValueError(f"Effect #{i}: must provide effect_size or effect_amp.")
 
-            # --------------------------------------------------
-            # 7a. Build subject-specific effect weights
-            #     shape => [n_samples*self.n_exp_conditions, n_channels]
-            # --------------------------------------------------
-            # Generate beta parameters randomy sampled from a standard normal distribution,
-            # but using CV to set the effects to their desired effect sizes. Adding channel covariance across effects
-            B = (
-                cv_diagonal
-                @ np.random.randn(n_samples * self.n_exp_conditions, n_channels)
-                @ ch_cov
-            )  # shape => [n_samples*self.n_exp_conditions, n_channels]
+            # now you don’t need the extra trace-based denominator:
+            if "effect_size" in eff:
+                amp = float(eff["effect_size"]) * self.noise_std
+            else:
+                amp = float(eff["effect_amp"]) / np.sqrt(self.n_channels)
 
-            # --------------------------------------------------
-            # 7b. Combine with the full design
-            #     shape => [n_epochs*n_samples, n_channels]
-            # --------------------------------------------------
-            sub_data = X_full @ B
+            effect_val.append({
+                "col_idx": col_idx,
+                "windows": windows,
+                "base_amp": amp,
+            })
+        return effect_val
+    
+    def _simulate_one_subject(self) -> np.ndarray:
+        """Simulate data for a single subject → (epochs, channels, samples)."""
+        # 1. initialise betas
+        B3d  = np.zeros((self.n_samples, self.n_exp_conditions, self.n_channels), dtype=float)
 
-            # --------------------------------------------------
-            # 7c. Add intercept
-            #     shape => [n_epochs*n_samples, n_channels]
-            # --------------------------------------------------
-            B0 = np.random.randn(1, n_channels) / 16.0
-            intercept = X0 @ B0
-            sub_data += intercept
+        # 2. Loop through each effect:
+        for eff in self.effects:
+            # subject‑specific amplitude
+            amp = self.rng.normal(loc=eff["base_amp"], scale=self.intersub_noise_std)
+            # generate random pattern
+            v = self.rng.standard_normal(self.n_channels)
+            # Normalize it to 1 Mahalanobis distance:
+            v /= np.sqrt(v @ np.linalg.pinv(self.ch_cov) @ v)        # unit Mahalanobis norm
 
-            # --------------------------------------------------
-            # 7d. Add noise (channel-correlated)
-            # --------------------------------------------------
-            noise = np.random.randn(self.n_epochs * n_samples, n_channels)
-            # Apply channel covariance
-            noise = noise @ ch_cov
-            noise *= noise_std
+            # build time resolved activation time course
+            act = np.zeros(self.n_samples, float)
+            for t0, t1 in eff["windows"]:
+                act[(self._tvec >= t0) & (self._tvec <= t1)] = 1.0
+            # Convolve with kernel if specified
+            if self.kern is not None:
+                act = np.convolve(act, self.kern, mode="full")[: self.n_samples]
+            # Normalize activation to 1:
+            peak = act.max()
+            if peak == 0:
+                continue  # no active time points
+            act *= amp / peak  # scale so max = amp
 
-            sub_data += noise
+            # insert into β (broadcast (time,1)*(1,channel))
+            B3d[:, eff["col_idx"], :] += act[:, None] * v
 
-            # --------------------------------------------------
-            # 7e. Store simulated data for this subject
-            # --------------------------------------------------
-            # Reshape the data:
-            # Reshape to [N, T, C] (trials x time x channels)
-            sub_data = np.transpose(
-                sub_data.reshape([self.n_epochs, len(t), n_channels]), [0, 2, 1]
-            )
-            self.data.append(sub_data)
+        # flatten to (condition*time, channels) with correct ordering
+        B = np.transpose(B3d, (1, 0, 2)).reshape(self.n_exp_conditions * self.n_samples, 
+                                                 self.n_channels)
+        B = B @ self.ch_cov  # apply Σ once
+        # Generate subject data by multiplying design matrix with betas:
+        sub_data = self._X_full @ B
+        # Add intercept:
+        sub_data += self._X0 @ (self.rng.standard_normal((1, self.n_channels)) / 16.0)
+        # Add spatially covaried noise:
+        noise = self.rng.standard_normal((self.n_epochs * self.n_samples, self.n_channels))
+        sub_data += (noise @ self.ch_cov) * self.noise_std
 
+        # reshape to (epochs, channels, samples)
+        return sub_data.reshape(self.n_epochs, self.n_samples, self.n_channels).transpose(0, 2, 1)
+    
+    def summary(self) -> str:
+        """Textual summary of the simulated dataset."""
+        return (
+            f"Subjects  : {len(self.data)}\n"
+            f"Epochs    : {self.n_epochs}\n"
+            f"Samples   : {self.n_samples}\n"
+            f"Channels  : {self.n_channels}\n"
+            f"Conditions: {self.n_exp_conditions} ({', '.join(self.X.columns)})"
+        )
+    
     def generate_events(
         self,
         X: np.ndarray = None,
-        cond_names: list = None,
         mapping: dict = None,
     ) -> tuple:
         """
@@ -336,36 +313,21 @@ class Simulator:
             Dictionary mapping label string to event integer.
         """
         if X is None:
-            X = self.X
+            X = self.X.copy()
 
-        n_trials, n_conds = X.shape
+        n_trials = X.shape[0]
 
-        # Set default condition names if not provided
-        if cond_names is None:
-            cond_names = [f"cond{i + 1}" for i in range(n_conds)]
+        # Replace condition id based on mapping:
+        if mapping is not None:
+            X.replace(mapping, inplace=True)
 
-        if len(cond_names) != n_conds:
-            raise ValueError(
-                f"Number of columns in X ({n_conds}) must match number of cond_names ({len(cond_names)})."
-            )
-
-        labels = []
-        for trial in X:
-            parts = []
-            for name, value in zip(cond_names, trial):
-                if mapping and name in mapping:
-                    label_value = mapping[name].get(value, str(value))
-                else:
-                    label_value = str(value)
-                parts.append(f"{name}_{label_value}")
-            labels.append("/".join(parts))
-
-        labels = np.array(labels)
+        # build one combined label per trial:  "condA_val1/condB_val2"
+        labels = (X.apply(lambda row: "/".join(f"{c}_{v}" for c, v in row.items()), axis=1)
+                    .to_numpy())
 
         # Unique combinations and event ID mapping
         unique_labels = np.unique(labels)
         event_id = {label: idx + 1 for idx, label in enumerate(unique_labels)}
-
         # Event numbers for each trial
         event_nums = np.array([event_id[label] for label in labels])
 
@@ -377,9 +339,7 @@ class Simulator:
         )
 
         # Events array [onset, 0, event_id]
-        events = np.zeros((n_trials, 3), dtype=int)
-        events[:, 0] = onsets
-        events[:, 2] = event_nums
+        events = np.column_stack([onsets, np.zeros_like(onsets), event_nums])
 
         return events, event_id
 
@@ -387,8 +347,8 @@ class Simulator:
         self,
         ch_type: str = "eeg",
         X: np.ndarray = None,
-        cond_names: list = None,
         mapping: dict = None,
+        verbose: str = 'ERROR'
     ) -> list:
         """
         Export the simulated data to MNE-Python format.
@@ -400,12 +360,11 @@ class Simulator:
             Default is ``'eeg'``.
         X : np.ndarray, shape (n_trials, n_conditions), optional
             Design matrix to use. If None, defaults to self.X.
-        cond_names : list of str, optional
-            Names of the experimental conditions (columns of X).
-            If None, defaults to ["cond1", "cond2", ..., "condN"].
         mapping : dict, optional
             Dictionary specifying custom label mapping per condition.
             Format: {condition_name: {original_value: label, ...}, ...}
+        verbose : string, optional
+            Verbosity level for MNE, see https://mne.tools/stable/generated/mne.verbose.html
 
         Returns
         -------
@@ -422,16 +381,17 @@ class Simulator:
                 f"    conda install -c conda-forge mne"
             )
         # Create events:
-        events, event_id = self.generate_events(X, cond_names, mapping)
+        events, event_id = self.generate_events(X, mapping)
 
         # Prepare info for epochs object in the end
         info = create_info(
             [f"CH{n:03}" for n in range(self.n_channels)],
             ch_types=[ch_type] * self.n_channels,
-            sfreq=self.sfreq,
+            sfreq=self.sfreq, verbose=verbose
         )
         epochs_list = [
-            EpochsArray(data, info, tmin=self.tmin, events=events, event_id=event_id)
+            EpochsArray(data, info, tmin=self.tmin, events=events, event_id=event_id,
+            verbose=verbose)
             for data in self.data
         ]
         return epochs_list
@@ -439,7 +399,6 @@ class Simulator:
     def export_to_eeglab(
         self,
         X: np.ndarray = None,
-        cond_names: list = None,
         mapping: dict = None,
         root: str = ".",
         fname_template: str = "sub-{:02d}.set",
@@ -487,7 +446,7 @@ class Simulator:
             os.makedirs(root)
 
         # Create events:
-        events, event_id = self.generate_events(X, cond_names, mapping)
+        events, event_id = self.generate_events(X, mapping)
 
         for i, epo in enumerate(self.data):
             filename = fname_template.format(i)

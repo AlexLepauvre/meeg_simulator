@@ -26,6 +26,8 @@ extensions = [
     "sphinx.ext.intersphinx",
     "numpydoc",
     "nbsphinx",
+    "sphinxcontrib.bibtex",
+    "myst_nb"
 ]
 
 intersphinx_mapping = {
@@ -44,6 +46,8 @@ pygments_style = "sphinx"
 
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "**.ipynb_checkpoints"]
+
+bibtex_bibfiles = ['../paper/paper.bib']
 
 
 # -- Options for HTML output -------------------------------------------------

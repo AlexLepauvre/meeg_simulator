@@ -11,10 +11,10 @@ authors = [
 ]
 license = { file = "LICENSE" }
 readme = "README.md"
-dependencies = ["numpy"]
+dependencies = ["numpy", "pandas"]
 
 [project.optional-dependencies]
-docs = ["pydata-sphinx-theme", "numpydoc", "nbsphinx", "ruff", "ipython"]
+docs = ["pydata-sphinx-theme", "numpydoc", "nbsphinx", "ruff", "ipython", "sphinxcontrib-bibtex", "myst-nb"]
 export = ["mne", "eeglabio"]
 dev = ["pytest"]
 

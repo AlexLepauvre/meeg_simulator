@@ -1,17 +1,22 @@
 MultiSim: A toolbox for simulating multivariate EEG/MEG data
 =============================================================
 
+Motivation and Overview
+--------
+One critical challenge in designing analysis pipelines for MEG/EEG data is confirming that the pipeline is both sensitive (i.e., it detects real effects) and specific (i.e., it avoids false alarms). In most cases, it is not known a priori whether or when experimental effects are present in the data, and it is therefore not possible to assess the sensitivity and specificity of analysis pipelines based on the data one is trying to analyse. 
+
 **MultiSim** is a Python package for simulating multivariate EEG/MEG datasets with user-defined experimental effects.  
 It enables principled testing and validation of decoding pipelines, source reconstruction methods, and statistical analyses.
 
 Features
 --------
-
-- Simulate multivariate EEG/MEG data with known ground-truth effects
-- Inject effects at specified time windows and across specified conditions
+Specifically, the toolbox allows to:
+- Specify a between-trial design (e.g., two conditions, Condition A and Condition B).
+- Inject multivariate effects at particular time windows (e.g., Condition A is active from 100–200 ms, Condition B from 300–400 ms).
 - Control signal-to-noise ratio, spatial covariance, temporal smoothing, and between-subject variability
 - Generate multiple subjects for group-level statistical analysis
 - Export to `MNE-Python <https://mne.tools/>`_ and `EEGLAB <https://sccn.ucsd.edu/eeglab/>`_ formats
+- Validate that the pipeline recovers the known effects accurately.
 
 Installation
 ------------
