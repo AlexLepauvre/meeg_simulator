@@ -1,4 +1,5 @@
 # Ignore generated eeglab directory docs\source\tutorial\data
+docs/jupyter_execute
 docs/source/tutorial/data/
 
 # Byte-compiled / optimized / DLL files
