@@ -210,7 +210,7 @@ ax[1, 2].set_xlim([epochs_strong[0].times[0], epochs_strong[0].times[-1]])
 ax[1, 2].set_xlabel("Time (s)")
 ax[1, 2].set_ylabel("AUC")
 ax[1, 2].legend()
-ax[1, 1].set_title('Decoding')
+ax[1, 2].set_title('Decoding')
 
 # ====================================================
 # 3.3. 3rd row (kernel example):
@@ -271,7 +271,7 @@ ax[3, 1].plot(epochs_temp_gen[0].times, np.mean(time_res_decoding, axis=0), labe
 ax[3, 1].fill_between(epochs_temp_gen[0].times, ci_low_cate, ci_up_cate, alpha=0.3, color="b")
 ax[3, 1].axhline(0.5, color="k", linestyle="--", label="chance")
 ax[3, 1].set_xlim([epochs_temp_gen[0].times[0], epochs_temp_gen[0].times[-1]])
-ax[3, 1].set_xlabel("Times")
+ax[3, 1].set_xlabel("Time (s)")
 ax[3, 1].set_ylabel("AUC")
 ax[3, 1].set_title("Decoding")
 # 3.2.3. Middle: Plot temporal generalization
